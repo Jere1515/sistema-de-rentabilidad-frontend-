@@ -38,9 +38,11 @@ const AdminOwnerForm = ({ onSaved, onCancel, owner }) => {
         payload.is_active = form.is_active === "true";
         response = await api.put(`/usuarios/${owner.id_usuario}`, payload);
       } else {
-        response = await api.post("/auth/register-propietario", {
-          nombre: form.nombre, email: form.email,
-          password: form.password, id_empresa: form.id_empresa,
+        response = await api.post("/usuarios", {
+          nombre: form.nombre,
+          email: form.email,
+          password: form.password,
+          id_empresa: Number(form.id_empresa),
         });
       }
       if (response.data?.success || response.data?.user) {
@@ -50,7 +52,12 @@ const AdminOwnerForm = ({ onSaved, onCancel, owner }) => {
         setError(response.data?.message || "Error al guardar el propietario.");
       }
     } catch (err) {
-      setError(err.response?.data?.message || "Error al guardar el propietario.");
+      const apiMessage = err.response?.data?.message;
+      if (apiMessage === "La empresa ya tiene un propietario") {
+        setError("Esta empresa ya tiene Propietario");
+      } else {
+        setError(apiMessage || "Error al guardar el propietario.");
+      }
     } finally {
       setLoading(false);
     }
