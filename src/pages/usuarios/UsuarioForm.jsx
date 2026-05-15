@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { createUser } from "../../services/usuarioService";
 import api from "../../services/api";
+import { notifySuccess, notifyError } from "../../utils/notify";
 
 const UsuarioForm = ({ onCreated, onCancel, usuario }) => {
   const isEdit = Boolean(usuario);
@@ -53,14 +54,17 @@ const UsuarioForm = ({ onCreated, onCancel, usuario }) => {
 
     if (response?.success || response?.user) {
       setSuccess(true);
+      notifySuccess(isEdit ? "Usuario actualizado correctamente" : "Usuario creado correctamente");
       setTimeout(() => { onCreated?.(); }, 700);
     } else {
       const msg = response?.message || "Error al guardar el usuario.";
       setError(msg);
+      notifyError(msg);
     }
   } catch (err) {
     const msg = err.response?.data?.message || "Empleado requiere monto y tipo de pago";
     setError(msg);
+    notifyError(msg);
   } finally {
     setLoading(false);
   }

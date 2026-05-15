@@ -2,10 +2,36 @@ import React, { useState, useEffect, useCallback } from "react";
 import Layout from "../../components/layout/Layout";
 import UsuarioForm from "./UsuarioForm";
 import { useAuth } from "../../context/AuthContext";
-import { getUsuarios, deleteUsuario, hardDeleteUsuario } from "../../services/usuarioService";
+import { getUsuarios, deleteUsuario } from "../../services/usuarioService";
+import { notifySuccess, notifyError } from "../../utils/notify";
 
 const ROL_BADGE = { lider: "badge-lider", empleado: "badge-empleado" };
 const ROL_LABEL = { lider: "Líder", empleado: "Empleado" };
+
+/* ── Confirm modal ───────────────────────────── */
+const ConfirmModal = ({ title, message, confirmLabel, danger, onConfirm, onCancel }) => (
+  <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onCancel()}>
+    <div className="modal-card p-4 animate-scaleIn" style={{ maxWidth: 420 }}>
+      <div className="d-flex align-items-start gap-3 mb-4">
+        <div className="rounded-3 d-flex align-items-center justify-content-center flex-shrink-0"
+          style={{ width: 44, height: 44, background: danger ? "rgba(239,68,68,.1)" : "rgba(245,158,11,.1)" }}>
+          <i className={`bi ${danger ? "bi-trash-fill" : "bi-exclamation-triangle-fill"}`}
+            style={{ color: danger ? "var(--danger)" : "var(--warning)", fontSize: 20 }}></i>
+        </div>
+        <div>
+          <h6 className="fw-bold mb-1">{title}</h6>
+          <p className="text-muted small mb-0">{message}</p>
+        </div>
+      </div>
+      <div className="d-flex gap-2">
+        <button className="btn btn-light flex-fill fw-semibold" onClick={onCancel}>Cancelar</button>
+        <button className={`btn ${danger ? "btn-danger" : "btn-warning"} flex-fill fw-bold`} onClick={onConfirm}>
+          {confirmLabel}
+        </button>
+      </div>
+    </div>
+  </div>
+);
 
 const UsuarioList = () => {
   const { user } = useAuth();
@@ -18,13 +44,13 @@ const UsuarioList = () => {
   const [showForm, setShowForm]           = useState(false);
   const [editingUsuario, setEditingUsuario] = useState(null);
   const [search, setSearch]               = useState("");
-  const [confirmHardDelete, setConfirmHardDelete] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
 
   const fetchUsuarios = useCallback(async () => {
     try {
       setLoading(true);
       const response = await getUsuarios();
-      if (response.success) setUsuarios(response.data);
+      if (response.success) setUsuarios((response.data || []).filter((u) => u?.is_active !== false));
       else setError("No se pudo cargar la lista de usuarios.");
     } catch {
       setError("Error al conectar con el servidor.");
@@ -39,25 +65,16 @@ const UsuarioList = () => {
 
   const handleEdit = (u) => { setEditingUsuario(u); setShowForm(true); };
 
-  const handleDelete = async (u) => {
-    if (!window.confirm(`¿Desactivar al usuario "${u.nombre}"?`)) return;
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
     try {
-      await deleteUsuario(u.id_usuario);
-      fetchUsuarios();
+      await deleteUsuario(confirmDelete.id_usuario);
+      setUsuarios((prev) => prev.filter((x) => x.id_usuario !== confirmDelete.id_usuario));
+      notifySuccess("Usuario eliminado correctamente");
     } catch (err) {
-      alert(err.response?.data?.message || "Error al desactivar.");
-    }
-  };
-
-  const handleHardDelete = async () => {
-    if (!confirmHardDelete) return;
-    try {
-      await hardDeleteUsuario(confirmHardDelete.id_usuario);
-      fetchUsuarios();
-    } catch (err) {
-      alert(err.response?.data?.message || "Error al eliminar el usuario.");
+      notifyError(err.response?.data?.message || "Error al eliminar el usuario.");
     } finally {
-      setConfirmHardDelete(null);
+      setConfirmDelete(null);
     }
   };
 
@@ -150,32 +167,6 @@ const UsuarioList = () => {
           />
         )}
 
-        {confirmHardDelete && (
-          <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setConfirmHardDelete(null)}>
-            <div className="modal-card p-4 animate-scaleIn" style={{ maxWidth: 420 }}>
-              <div className="d-flex align-items-start gap-3 mb-4">
-                <div className="rounded-3 d-flex align-items-center justify-content-center flex-shrink-0"
-                  style={{ width: 44, height: 44, background: "rgba(239,68,68,.1)" }}>
-                  <i className="bi bi-trash-fill" style={{ color: "var(--danger)", fontSize: 20 }}></i>
-                </div>
-                <div>
-                  <h6 className="fw-bold mb-1">Eliminar usuario permanentemente</h6>
-                  <p className="text-muted small mb-0">
-                    ¿Estás seguro de eliminar a <strong>{confirmHardDelete.nombre}</strong>?
-                    Esta acción <strong>no se puede deshacer</strong> y eliminará también sus registros de horas y asignaciones.
-                  </p>
-                </div>
-              </div>
-              <div className="d-flex gap-2">
-                <button className="btn btn-light flex-fill fw-semibold" onClick={() => setConfirmHardDelete(null)}>Cancelar</button>
-                <button className="btn btn-danger flex-fill fw-bold" onClick={handleHardDelete}>
-                  <i className="bi bi-trash-fill me-2"></i>Eliminar permanentemente
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Search */}
         <div className="mb-3">
           <div className="input-group" style={{ maxWidth: 360 }}>
@@ -230,7 +221,7 @@ const UsuarioList = () => {
                       </td>
                       <td className="text-muted">{u.email}</td>
                       <td>
-                        <span className={`badge badge-role ${ROL_BADGE[u.rol] || "badge-owner"}`}>
+                        <span className={`badge badge-role usuarios-rol-badge ${ROL_BADGE[u.rol] || "badge-owner"}`}>
                           {ROL_LABEL[u.rol] || u.rol}
                         </span>
                       </td>
@@ -241,12 +232,8 @@ const UsuarioList = () => {
                               onClick={() => handleEdit(u)}>
                               <i className="bi bi-pencil-square"></i>
                             </button>
-                            <button className="btn btn-sm btn-warning" title="Desactivar"
-                              onClick={() => handleDelete(u)}>
-                              <i className="bi bi-person-x-fill"></i>
-                            </button>
-                            <button className="btn btn-sm btn-danger" title="Eliminar permanentemente"
-                              onClick={() => setConfirmHardDelete(u)}>
+                            <button className="btn btn-sm btn-danger" title="Eliminar"
+                              onClick={() => setConfirmDelete(u)}>
                               <i className="bi bi-trash-fill"></i>
                             </button>
                           </div>
@@ -272,6 +259,17 @@ const UsuarioList = () => {
           </div>
         </div>
       </div>
+
+      {confirmDelete && (
+        <ConfirmModal
+          title="Eliminar usuario"
+          message="¿Seguro que quieres eliminar este usuario?"
+          confirmLabel={<><i className="bi bi-trash-fill me-2"></i>Eliminar</>}
+          danger
+          onConfirm={handleDelete}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
     </Layout>
   );
 };

@@ -16,7 +16,7 @@ export const updateUsuario = async (id, data) => {
 };
 
 export const deleteUsuario = async (id) => {
-  const response = await api.put(`/usuarios/${id}`, { is_active: false });
+  const response = await api.delete(`/usuarios/${id}`);
   return response.data;
 };
 

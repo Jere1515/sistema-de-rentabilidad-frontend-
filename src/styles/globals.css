@@ -225,13 +225,19 @@ body {
   white-space: nowrap;
 }
 .badge-admin       { background: #fee2e2; color: #991b1b; border: 1.5px solid rgba(153,27,27,.3); }
-.badge-propietario { background: #e0e7ff; color: #3730a3; border: 1.5px solid rgba(55,48,163,.3); }
-.badge-lider       { background: #fef3c7; color: #92400e; border: 1.5px solid rgba(146,64,14,.3); }
-.badge-empleado    { background: #d1fae5; color: #065f46; border: 1.5px solid rgba(6,95,70,.3); }
+.badge-propietario { background: #e0e7ff; color: #3730a3 !important; border: 1.5px solid rgba(55,48,163,.3); }
+.badge-lider       { background: #fef3c7; color: #92400e !important; border: 1.5px solid rgba(146,64,14,.3); }
+.badge-empleado    { background: #d1fae5; color: #065f46 !important; border: 1.5px solid rgba(6,95,70,.3); }
 .badge-active      { background: #d1fae5; color: #065f46; border: 1.5px solid rgba(6,95,70,.3); }
 .badge-inactive    { background: #f1f5f9; color: #334155; border: 1.5px solid rgba(51,65,85,.25); }
-.badge-owner       { background: #e0e7ff; color: #3730a3; border: 1.5px solid rgba(55,48,163,.3); }
+.badge-owner       { background: #e0e7ff; color: #3730a3 !important; border: 1.5px solid rgba(55,48,163,.3); }
 .badge-edit        { background: #fef9c3; color: #854d0e; border: 1.5px solid rgba(133,77,14,.3); }
+
+/* ── Badges específicos de tablas ───────────────── */
+.usuarios-rol-badge {
+  font-size: .78rem;
+  letter-spacing: .02em;
+}
 
 /* ── Form controls ────────────────────────────── */
 .form-control, .form-select {
