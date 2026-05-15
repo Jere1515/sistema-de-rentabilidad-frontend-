@@ -4,6 +4,7 @@ import {
   updateServicio,
   getServicioById,
 } from "../../services/servicioService";
+import { notifySuccess, notifyError } from "../../utils/notify";
 
 const ServicioForm = ({ servicioId, onSaved, onCancel }) => {
   const [form, setForm] = useState({ nombre: "", descripcion: "" });
@@ -39,12 +40,17 @@ const ServicioForm = ({ servicioId, onSaved, onCancel }) => {
         : await createServicio(form);
 
       if (response?.success) {
+        notifySuccess(servicioId ? "Servicio actualizado correctamente" : "Servicio creado correctamente");
         onSaved?.();
       } else {
-        setError(response?.message || "Error al guardar el servicio.");
+        const msg = response?.message || "Error al guardar el servicio.";
+        setError(msg);
+        notifyError(msg);
       }
     } catch (err) {
-      setError(err.response?.data?.message || "Error al guardar el servicio.");
+      const msg = err.response?.data?.message || "Error al guardar el servicio.";
+      setError(msg);
+      notifyError(msg);
     } finally {
       setLoading(false);
     }

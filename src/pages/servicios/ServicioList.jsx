@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import Layout from "../../components/layout/Layout";
 import ServicioForm from "./ServicioForm";
-import { getServicios, desactivarServicio, eliminarServicio } from "../../services/servicioService";
+import { getServicios, desactivarServicio } from "../../services/servicioService";
+import { notifySuccess, notifyError } from "../../utils/notify";
 
 /* ── Modal de confirmación ──────────────────────── */
-const ConfirmModal = ({ title, message, onConfirm, onCancel, danger = false }) => (
+const ConfirmModal = ({ title, message, confirmLabel, danger, onConfirm, onCancel }) => (
   <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onCancel()}>
     <div className="modal-card p-4 animate-scaleIn" style={{ maxWidth: 420 }}>
       <div className="d-flex align-items-start gap-3 mb-4">
@@ -21,7 +22,7 @@ const ConfirmModal = ({ title, message, onConfirm, onCancel, danger = false }) =
       <div className="d-flex gap-2">
         <button className="btn btn-light flex-fill fw-semibold" onClick={onCancel}>Cancelar</button>
         <button className={`btn ${danger ? "btn-danger" : "btn-warning"} flex-fill fw-bold`} onClick={onConfirm}>
-          {danger ? <><i className="bi bi-trash-fill me-2"></i>Eliminar</> : <><i className="bi bi-slash-circle me-2"></i>Desactivar</>}
+          {confirmLabel}
         </button>
       </div>
     </div>
@@ -35,13 +36,13 @@ const ServicioList = () => {
   const [showForm, setShowForm]   = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [search, setSearch]       = useState("");
-  const [confirm, setConfirm]     = useState(null); // { type: 'deactivate'|'delete', servicio }
+  const [confirm, setConfirm]     = useState(null); // servicio
 
   const fetchServicios = useCallback(async () => {
     try {
       setLoading(true);
       const response = await getServicios();
-      if (response.success) setServicios(response.data);
+      if (response.success) setServicios((response.data || []).filter((s) => s?.is_active !== false));
       else setError("No se pudo cargar la lista de servicios.");
     } catch {
       setError("Error al conectar con el servidor.");
@@ -58,11 +59,11 @@ const ServicioList = () => {
   const handleConfirmAction = async () => {
     if (!confirm) return;
     try {
-      if (confirm.type === "deactivate") await desactivarServicio(confirm.servicio.id_servicio);
-      else await eliminarServicio(confirm.servicio.id_servicio);
-      fetchServicios();
+      await desactivarServicio(confirm.id_servicio);
+      setServicios((prev) => prev.filter((x) => x.id_servicio !== confirm.id_servicio));
+      notifySuccess("Servicio eliminado correctamente");
     } catch (err) {
-      alert(err.response?.data?.message || "Error al procesar la acción.");
+      notifyError(err.response?.data?.message || "Error al procesar la acción.");
     } finally {
       setConfirm(null);
     }
@@ -94,8 +95,9 @@ const ServicioList = () => {
         <div className="row g-3 mb-4 stagger">
           {[
             { label: "Total servicios", value: servicios.length, icon: "bi-briefcase-fill", color: "var(--primary)", bg: "rgba(79,70,229,.1)" },
-            { label: "Activos",         value: activos,          icon: "bi-check-circle-fill", color: "var(--success)", bg: "rgba(16,185,129,.1)" },
-            { label: "Inactivos",       value: servicios.length - activos, icon: "bi-x-circle-fill", color: "var(--danger)", bg: "rgba(239,68,68,.1)" },
+            // TEMP: oculto para no mostrar estado en frontend
+            // { label: "Activos",         value: activos,          icon: "bi-check-circle-fill", color: "var(--success)", bg: "rgba(16,185,129,.1)" },
+            // { label: "Inactivos",       value: servicios.length - activos, icon: "bi-x-circle-fill", color: "var(--danger)", bg: "rgba(239,68,68,.1)" },
           ].map((s, i) => (
             <div className="col-12 col-sm-4" key={i}>
               <div className="stat-card card-3d animate-fadeInUp">
@@ -148,7 +150,6 @@ const ServicioList = () => {
                   <th>#</th>
                   <th>Servicio</th>
                   <th>Descripción</th>
-                  <th>Estado</th>
                   <th className="text-end">Acciones</th>
                 </tr>
               </thead>
@@ -156,7 +157,7 @@ const ServicioList = () => {
                 {loading ? (
                   Array.from({ length: 4 }).map((_, i) => (
                     <tr key={i}>
-                      {Array.from({ length: 5 }).map((_, j) => (
+                      {Array.from({ length: 4 }).map((_, j) => (
                         <td key={j}><div className="skeleton rounded" style={{ height: 20, width: "80%" }}></div></td>
                       ))}
                     </tr>
@@ -177,24 +178,13 @@ const ServicioList = () => {
                       <td className="text-muted" style={{ maxWidth: 200 }}>
                         <span className="text-truncate d-block">{s.descripcion || "—"}</span>
                       </td>
-                      <td>
-                        <span className={`badge badge-role ${s.is_active ? "badge-active" : "badge-inactive"}`}>
-                          {s.is_active ? "Activo" : "Inactivo"}
-                        </span>
-                      </td>
                       <td className="text-end">
                         <div className="d-flex gap-2 justify-content-end">
                           <button className="btn btn-sm btn-success" title="Editar" onClick={() => handleEdit(s.id_servicio)}>
                             <i className="bi bi-pencil-square"></i>
                           </button>
-                          {s.is_active && (
-                            <button className="btn btn-sm btn-warning" title="Desactivar"
-                              onClick={() => setConfirm({ type: "deactivate", servicio: s })}>
-                              <i className="bi bi-slash-circle"></i>
-                            </button>
-                          )}
-                          <button className="btn btn-sm btn-danger" title="Eliminar permanentemente"
-                            onClick={() => setConfirm({ type: "delete", servicio: s })}>
+                          <button className="btn btn-sm btn-danger" title="Eliminar"
+                            onClick={() => setConfirm(s)}>
                             <i className="bi bi-trash-fill"></i>
                           </button>
                         </div>
@@ -203,7 +193,7 @@ const ServicioList = () => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="5">
+                    <td colSpan="4">
                       <div className="empty-state">
                         <i className="bi bi-briefcase"></i>
                         <h6>Sin servicios</h6>
@@ -220,11 +210,10 @@ const ServicioList = () => {
 
       {confirm && (
         <ConfirmModal
-          danger={confirm.type === "delete"}
-          title={confirm.type === "delete" ? "Eliminar servicio" : "Desactivar servicio"}
-          message={confirm.type === "delete"
-            ? `¿Estás seguro de eliminar permanentemente "${confirm.servicio.nombre}"? Esta acción no se puede deshacer.`
-            : `¿Desactivar el servicio "${confirm.servicio.nombre}"?`}
+          danger
+          title="Eliminar servicio"
+          message="¿Seguro que quieres eliminar este servicio?"
+          confirmLabel={<><i className="bi bi-trash-fill me-2"></i>Eliminar</>}
           onConfirm={handleConfirmAction}
           onCancel={() => setConfirm(null)}
         />
