@@ -2,8 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { getEmpresaById } from "../../services/empresaService";
-import { marcarEntrada, marcarSalida } from "../../services/horasService"; //
-import { notifySuccess, notifyError } from "../../utils/notify"; //
+import ButtonMarcaje from "../ui/ButtonMarcaje";
 
 /* Nav items por rol — solo se muestran los que el usuario puede usar */
 const getNavItems = (rol) => {
@@ -35,7 +34,7 @@ const getNavItems = (rol) => {
     case "empleado":
       return [
         { to: "/mi-espacio", icon: "bi-grid-fill", label: "Mi Espacio" },
-        { to: "/mis-marcajes", icon: "bi-calendar-check",  label: "Mis Marcajes" }, // Nuevo item
+        { to: "/mis-marcajes", icon: "bi-calendar-check", label: "Mis Marcajes" },
         { to: "/proyectos", icon: "bi-kanban-fill", label: "Mis Proyectos" },
         { to: "/mis-horas", icon: "bi-clock-history", label: "Mis Horas" },
         { to: "/perfil", icon: "bi-person-circle", label: "Mi Perfil" },
@@ -53,55 +52,14 @@ const Sidebar = () => {
 
   const [empresaNombre, setEmpresaNombre] = useState("");
 
-  // --- ESTADOS PARA HU 23 (MARCAJE) ---
-  const [cargandoMarcaje, setCargandoMarcaje] = useState(false);
-  const [entradaMarcada, setEntradaMarcada] = useState(localStorage.getItem("entrada_marcada") === "true");
-  const [salidaMarcada, setSalidaMarcada] = useState(localStorage.getItem("salida_marcada") === "true");
-
-
   useEffect(() => {
     if (!user?.id_empresa) return;
     getEmpresaById(user.id_empresa)
-      .then((r) => { if (r?.success) setEmpresaNombre(r.data.nombre); })
-      .catch(() => { });
+      .then((r) => {
+        if (r?.success) setEmpresaNombre(r.data.nombre);
+      })
+      .catch(() => {});
   }, [user?.id_empresa]);
-
-  // --- LÓGICA DE MARCAJE (SIMULADA) ---
-  const handleMarcajeEntrada = async () => {
-    try {
-      setCargandoMarcaje(true);
-      const res = await marcarEntrada(); // Llama a la simulación en el servicio
-      if (res.success) {
-        notifySuccess(res.message);
-        setEntradaMarcada(true);
-        localStorage.setItem("entrada_marcada", "true"); // Persistencia local
-      }
-    } catch (error) {
-      notifyError("No se pudo registrar la entrada.");
-    } finally {
-      setCargandoMarcaje(false);
-    }
-  };
-
-  const handleMarcajeSalida = async () => {
-    try {
-      setCargandoMarcaje(true);
-      const res = await marcarSalida();
-      if (res.success) {
-        notifySuccess(res.message);
-        setSalidaMarcada(true);
-        localStorage.setItem("salida_marcada", "true");
-
-        // REDIRECCIÓN OBLIGATORIA A REGISTRO DE HORAS
-        // Se limpia el estado de entrada para el día siguiente pero se bloquea la UI
-        setTimeout(() => navigate("/mis-horas?registrar=true"), 1500);
-      }
-    } catch (error) {
-      notifyError(error);
-    } finally {
-      setCargandoMarcaje(false);
-    }
-  };
 
   const navItems = getNavItems(rol);
   const active = (path) => location.pathname === path;
@@ -179,24 +137,13 @@ const Sidebar = () => {
         })}
       </nav>
 
-      {/* Marcaje de Entrada (HU 23) - Solo visible para Líderes y Empleados */}
-      {(rol === "empleado" || rol === "lider") && (
+      {/* Marcaje de Entrada - Solo visible para Empleados */}
+      {rol === "empleado" && (
         <div className="px-3 mb-3">
-          {!entradaMarcada ? (
-            <button className="btn btn-sm w-100 btn-success fw-bold" onClick={handleMarcajeEntrada} disabled={cargandoMarcaje}>
-              <i className="bi bi-box-arrow-in-right me-2"></i> Marcar Entrada
-            </button>
-          ) : !salidaMarcada ? (
-            <button className="btn btn-sm w-100 btn-warning fw-bold text-dark" onClick={handleMarcajeSalida} disabled={cargandoMarcaje}>
-              <i className="bi bi-box-arrow-right me-2"></i> Marcar Salida
-            </button>
-          ) : (
-            <div className="alert alert-info py-2 small mb-0 border-0 text-center">
-              <i className="bi bi-clock-history me-2"></i> Jornada Finalizada
-            </div>
-          )}
+          <ButtonMarcaje />
         </div>
       )}
+
       {/* User card + logout */}
       <div className="p-3" style={{ borderTop: "1px solid rgba(255,255,255,.07)" }}>
         <div
@@ -223,7 +170,10 @@ const Sidebar = () => {
         <button
           className="btn btn-sm w-100 d-flex align-items-center justify-content-center gap-2 rounded-3"
           style={{ background: "rgba(239,68,68,.15)", color: "#FCA5A5", fontSize: 12, fontWeight: 600, border: "1px solid rgba(239,68,68,.2)", transition: "all .2s" }}
-          onClick={() => { logout(); navigate("/login"); }}
+          onClick={() => {
+            logout();
+            navigate("/login");
+          }}
         >
           <i className="bi bi-box-arrow-left"></i>
           Cerrar sesión
