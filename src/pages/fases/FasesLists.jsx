@@ -15,7 +15,7 @@ const normalizeFases = (data) =>
 const getHorasFaseId = (registro) => registro.id_fase ?? registro.fase_id ?? null;
 const getHorasFaseNombre = (registro) => registro.fase_nombre ?? registro.nombre_fase ?? registro.fase ?? "";
 
-const FasesLists = ({ proyectoId: proyectoIdProp, embedded = false, onClose, horasResumen = [] }) => {
+const FasesLists = ({ proyectoId: proyectoIdProp, embedded = false, onClose, onChanged, horasResumen = [] }) => {
   const params = useParams();
   const { user } = useAuth();
   const proyectoId = proyectoIdProp || params.proyectoId || params.id;
@@ -142,6 +142,7 @@ const FasesLists = ({ proyectoId: proyectoIdProp, embedded = false, onClose, hor
     setShowForm(false);
     setEditingId(null);
     fetchFases();
+    onChanged?.();
   };
 
   const handleEdit = (id) => {

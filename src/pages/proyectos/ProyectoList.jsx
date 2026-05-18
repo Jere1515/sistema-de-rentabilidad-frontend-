@@ -10,6 +10,7 @@ import {
   getProyectos, getMisProyectos, getProyectoById, eliminarProyecto, 
   finalizarProyecto, getHorasResumenProyecto // Asegúrate de que esté importado
 } from "../../services/proyectoService";
+import { getFasesByProyecto } from "../../services/faseService";
 import { notifySuccess, notifyError } from "../../utils/notify"; // Importación necesaria para feedback
 
 
@@ -27,6 +28,40 @@ const getHoraFaseId = (registro) => registro.id_fase ?? registro.fase_id ?? null
 const getHoraFaseNombre = (registro) => registro.fase_nombre ?? registro.nombre_fase ?? registro.fase ?? "";
 const getHoraFecha = (registro) => registro.fecha ?? registro.fecha_registro ?? registro.created_at ?? "";
 const getHoraProyectoId = (registro, fallbackId) => Number(registro.id_proyecto ?? registro.proyecto_id ?? fallbackId);
+const getFasesData = (response) => {
+  if (Array.isArray(response)) return response;
+  if (response?.success && Array.isArray(response.data)) return response.data;
+  return [];
+};
+const getFaseId = (fase) => fase.id_fase ?? fase.id ?? fase.fase_id ?? null;
+const getFaseNombre = (fase) => fase.nombre ?? fase.fase_nombre ?? fase.nombre_fase ?? fase.fase ?? "";
+const getFaseHorasEstimadas = (fase) => Number(fase.horas_estimadas ?? fase.horas_estimada ?? fase.horas ?? 0);
+const normalizeProyectoFases = (response) =>
+  getFasesData(response).map((fase, index) => ({
+    ...fase,
+    id_fase: getFaseId(fase) ?? `fase-${index}`,
+    nombre: getFaseNombre(fase) || `Fase #${getFaseId(fase) ?? index + 1}`,
+    horas_estimadas: getFaseHorasEstimadas(fase),
+  }));
+const getTotalHorasEstimadas = (fases = []) =>
+  fases.reduce((acc, fase) => acc + getFaseHorasEstimadas(fase), 0);
+const getHorasRegistradasByFase = (resumen = []) => {
+  const map = new Map();
+
+  resumen.forEach((registro) => {
+    const faseId = getHoraFaseId(registro);
+    const faseNombre = getHoraFaseNombre(registro);
+    const total = Number(registro.total_horas ?? registro.horas ?? 0);
+    if (faseId !== null && faseId !== undefined) {
+      map.set(String(faseId), Number(map.get(String(faseId)) || 0) + total);
+    }
+    if (faseNombre) {
+      map.set(String(faseNombre), Number(map.get(String(faseNombre)) || 0) + total);
+    }
+  });
+
+  return map;
+};
 
 const normalizeHorasResumen = (response, proyecto) =>
   getHorasResumenData(response).map((registro, index) => ({
@@ -42,30 +77,6 @@ const normalizeHorasResumen = (response, proyecto) =>
 
 const getTotalHorasResumen = (resumen = []) =>
   resumen.reduce((acc, registro) => acc + Number(registro.total_horas || 0), 0);
-
-const groupHorasByFase = (resumen = []) => {
-  const map = new Map();
-
-  resumen.forEach((registro) => {
-    const faseId = registro.id_fase;
-    const faseNombre = registro.fase_nombre;
-    if (!faseId && !faseNombre) return;
-
-    const key = String(faseId ?? faseNombre);
-    const actual = map.get(key) || {
-      id_fase: faseId,
-      fase_nombre: faseNombre || `Fase #${faseId}`,
-      total_horas: 0,
-    };
-
-    actual.total_horas += Number(registro.total_horas || 0);
-    map.set(key, actual);
-  });
-
-  return Array.from(map.values()).sort((a, b) =>
-    String(a.fase_nombre).localeCompare(String(b.fase_nombre))
-  );
-};
 
 const isDateInRange = (date, desde, hasta) => {
   if (!date) return false;
@@ -99,13 +110,13 @@ const ConfirmModal = ({ title, message, confirmLabel, danger, onConfirm, onCance
 );
 
 /* ── Detalle de proyecto ─────────────────────── */
-const ProyectoDetailModal = ({ proyecto, onClose, horasResumen = [], horasLoading = false, horasError = "" }) => {
+const ProyectoDetailModal = ({ proyecto, onClose, horasResumen = [], fases = [], horasLoading = false, horasError = "" }) => {
   if (!proyecto) return null;
 
   const empleados = Array.isArray(proyecto.empleados) ? proyecto.empleados : [];
   const totalHoras = getTotalHorasResumen(horasResumen);
-  const horasPorFase = groupHorasByFase(horasResumen);
-  const resumenSinFase = horasResumen.length > 0 && horasPorFase.length === 0;
+  const totalEstimadas = getTotalHorasEstimadas(fases);
+  const horasRegistradasByFase = getHorasRegistradasByFase(horasResumen);
 
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -135,6 +146,9 @@ const ProyectoDetailModal = ({ proyecto, onClose, horasResumen = [], horasLoadin
                   </span>
                   <span className="badge badge-role badge-lider">
                     Horas: {horasLoading ? "..." : `${totalHoras.toFixed(1)}h`}
+                  </span>
+                  <span className="badge badge-role badge-empleado">
+                    Estimadas: {totalEstimadas.toFixed(1)}h
                   </span>
                   {proyecto.presupuesto && (
                     <span className="badge badge-role badge-propietario">
@@ -181,10 +195,10 @@ const ProyectoDetailModal = ({ proyecto, onClose, horasResumen = [], horasLoadin
             <div className="d-flex align-items-center justify-content-between gap-2 mb-3">
               <h6 className="fw-bold small mb-0">
                 <i className="bi bi-clock-history me-2" style={{ color: "var(--primary)" }}></i>
-                Horas por fase
+                Fases del proyecto
               </h6>
               <span className="fw-bold" style={{ color: "var(--primary)" }}>
-                {horasLoading ? "..." : `${totalHoras.toFixed(1)}h`}
+                {fases.length} fase{fases.length !== 1 ? "s" : ""}
               </span>
             </div>
 
@@ -192,33 +206,39 @@ const ProyectoDetailModal = ({ proyecto, onClose, horasResumen = [], horasLoadin
               <p className="text-muted small mb-0">{horasError}</p>
             ) : horasLoading ? (
               <div className="skeleton rounded" style={{ height: 24, width: "60%" }}></div>
-            ) : horasPorFase.length > 0 ? (
+            ) : fases.length > 0 ? (
               <div className="table-responsive">
                 <table className="table table-sm mb-0">
                   <thead>
                     <tr>
                       <th className="text-muted small">Fase</th>
-                      <th className="text-end text-muted small">Total horas</th>
+                      <th className="text-end text-muted small">Estimadas</th>
+                      <th className="text-end text-muted small">Registradas</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {horasPorFase.map((fase) => (
-                      <tr key={fase.id_fase ?? fase.fase_nombre}>
-                        <td className="fw-semibold small">{fase.fase_nombre}</td>
+                    {fases.map((fase) => {
+                      const faseId = getFaseId(fase);
+                      const faseNombre = getFaseNombre(fase);
+                      const registradas = horasRegistradasByFase.get(String(faseId)) ??
+                        horasRegistradasByFase.get(String(faseNombre)) ?? 0;
+
+                      return (
+                      <tr key={faseId ?? faseNombre}>
+                        <td className="fw-semibold small">{faseNombre}</td>
                         <td className="text-end fw-bold small" style={{ color: "var(--primary)" }}>
-                          {Number(fase.total_horas || 0).toFixed(1)}h
+                          {getFaseHorasEstimadas(fase).toFixed(1)}h
+                        </td>
+                        <td className="text-end fw-bold small" style={{ color: "var(--accent)" }}>
+                          {Number(registradas || 0).toFixed(1)}h
                         </td>
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
               </div>
-            ) : resumenSinFase ? (
-              <p className="text-muted small mb-0">
-                El endpoint devuelve horas del proyecto, pero no incluye fase para mostrar el desglose.
-              </p>
             ) : (
-              <p className="text-muted small mb-0">Sin horas registradas para este proyecto.</p>
+              <p className="text-muted small mb-0">Sin fases registradas para este proyecto.</p>
             )}
           </div>
         </div>
@@ -237,6 +257,8 @@ const ProjectContentModal = ({ children, onClose }) => (
 
 const EmpleadoProyectoDetailModal = ({ proyecto, onClose, horasRegistradas = 0, fases = [] }) => {
   if (!proyecto) return null;
+
+  const totalEstimadas = getTotalHorasEstimadas(fases);
 
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -269,6 +291,9 @@ const EmpleadoProyectoDetailModal = ({ proyecto, onClose, horasRegistradas = 0, 
                       {fases.length} fase{fases.length !== 1 ? "s" : ""}
                     </span>
                   )}
+                  <span className="badge badge-role badge-lider">
+                    Estimadas: {totalEstimadas.toFixed(1)}h
+                  </span>
                 </div>
               </div>
             </div>
@@ -302,11 +327,12 @@ const EmpleadoProyectoDetailModal = ({ proyecto, onClose, horasRegistradas = 0, 
 
           {fases.length > 0 && (
             <div className="mt-3">
-              <h6 className="fw-bold small mb-2">Fases con horas registradas</h6>
+              <h6 className="fw-bold small mb-2">Fases del proyecto</h6>
               <div className="d-flex flex-wrap gap-2">
                 {fases.map((fase) => (
-                  <span key={fase} className="badge rounded-pill" style={{ background: "rgba(79,70,229,.1)", color: "var(--primary)" }}>
-                    {fase}
+                  <span key={getFaseId(fase) ?? getFaseNombre(fase)} className="badge rounded-pill" style={{ background: "rgba(79,70,229,.1)", color: "var(--primary)" }}>
+                    {getFaseNombre(fase)}
+                    {getFaseHorasEstimadas(fase) > 0 ? ` · ${getFaseHorasEstimadas(fase).toFixed(1)}h` : ""}
                   </span>
                 ))}
               </div>
@@ -334,6 +360,7 @@ const PropietarioView = () => {
   const [contentModal, setContentModal] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [horasResumenByProyecto, setHorasResumenByProyecto] = useState({});
+  const [fasesByProyecto, setFasesByProyecto] = useState({});
   const [loadingHoras, setLoadingHoras] = useState(false);
   const [horasError, setHorasError] = useState("");
 
@@ -367,7 +394,18 @@ const PropietarioView = () => {
             }
           })
         );
+        const fasesEntries = await Promise.all(
+          proyectosConDetalle.map(async (proyecto) => {
+            try {
+              const fases = await getFasesByProyecto(proyecto.id_proyecto);
+              return [proyecto.id_proyecto, normalizeProyectoFases(fases)];
+            } catch {
+              return [proyecto.id_proyecto, []];
+            }
+          })
+        );
         setHorasResumenByProyecto(Object.fromEntries(resumenEntries));
+        setFasesByProyecto(Object.fromEntries(fasesEntries));
         setHorasError("");
         setLoadingHoras(false);
       } else {
@@ -377,6 +415,7 @@ const PropietarioView = () => {
     } catch {
       setError("Error al conectar con el servidor.");
       setHorasResumenByProyecto({});
+      setFasesByProyecto({});
     } finally {
       setLoading(false);
       setLoadingHoras(false);
@@ -436,16 +475,16 @@ const PropietarioView = () => {
   const fasesDisponibles = useMemo(() => {
     const fases = new Map();
 
-    resumenRows.forEach((registro) => {
-      const faseId = registro.id_fase;
-      const faseNombre = registro.fase_nombre;
+    Object.values(fasesByProyecto).flat().forEach((fase) => {
+      const faseId = getFaseId(fase);
+      const faseNombre = getFaseNombre(fase);
       if (!faseId && !faseNombre) return;
       const key = String(faseId ?? faseNombre);
       if (!fases.has(key)) fases.set(key, faseNombre || `Fase #${faseId}`);
     });
 
     return Array.from(fases.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [resumenRows]);
+  }, [fasesByProyecto]);
 
   const clearHourFilters = () => {
     setSearch("");
@@ -463,6 +502,7 @@ const PropietarioView = () => {
       const resumenByDate = fechaDesde || fechaHasta
         ? resumen.filter((registro) => isDateInRange(registro.fecha, fechaDesde, fechaHasta))
         : resumen;
+      const fasesProyecto = fasesByProyecto[p.id_proyecto] || [];
 
       const matchSearch = !term ||
         p.nombre.toLowerCase().includes(term) ||
@@ -470,14 +510,14 @@ const PropietarioView = () => {
         getServicioNombre(p).toLowerCase().includes(term) ||
         getLiderNombre(p).toLowerCase().includes(term);
       const matchProyecto = !filterProyecto || String(p.id_proyecto) === filterProyecto;
-      const matchFase = !filterFase || resumenByDate.some((registro) =>
-        String(registro.id_fase ?? registro.fase_nombre) === filterFase
+      const matchFase = !filterFase || fasesProyecto.some((fase) =>
+        String(getFaseId(fase) ?? getFaseNombre(fase)) === filterFase
       );
       const matchFecha = !(fechaDesde || fechaHasta) || resumenByDate.length > 0;
 
       return matchSearch && matchProyecto && matchFase && matchFecha;
     });
-  }, [proyectos, horasResumenByProyecto, search, filterProyecto, filterFase, fechaDesde, fechaHasta]);
+  }, [proyectos, horasResumenByProyecto, fasesByProyecto, search, filterProyecto, filterFase, fechaDesde, fechaHasta]);
 
   const getResumenVisible = useCallback((proyectoId) => {
     const resumen = horasResumenByProyecto[proyectoId] || [];
@@ -489,6 +529,13 @@ const PropietarioView = () => {
       return matchFase && matchFecha;
     });
   }, [horasResumenByProyecto, filterFase, fechaDesde, fechaHasta]);
+
+  const getFasesVisible = useCallback((proyectoId) => {
+    const fases = fasesByProyecto[proyectoId] || [];
+    return fases.filter((fase) => !filterFase ||
+      String(getFaseId(fase) ?? getFaseNombre(fase)) === filterFase
+    );
+  }, [fasesByProyecto, filterFase]);
 
   const totalHorasFiltradas = filtered.reduce(
     (acc, proyecto) => acc + getTotalHorasResumen(getResumenVisible(proyecto.id_proyecto)),
@@ -636,7 +683,8 @@ const PropietarioView = () => {
                     const active = isProyectoActivo(p);
                     const resumenVisible = getResumenVisible(p.id_proyecto);
                     const totalHorasProyecto = getTotalHorasResumen(resumenVisible);
-                    const fasesConHoras = groupHorasByFase(resumenVisible);
+                    const fasesProyecto = getFasesVisible(p.id_proyecto);
+                    const totalHorasEstimadas = getTotalHorasEstimadas(fasesProyecto);
                     return (
                       <tr key={p.id_proyecto} className="animate-fadeIn" style={{ cursor: "pointer" }} onClick={() => setSelected(p)}>
                         <td><i className="bi bi-chevron-right" style={{ color: "var(--primary)", fontSize: 12 }}></i></td>
@@ -674,9 +722,12 @@ const PropietarioView = () => {
                           <span className="fw-bold" style={{ color: "var(--primary)" }}>
                             {loadingHoras ? "..." : `${totalHorasProyecto.toFixed(1)}h`}
                           </span>
-                          {fasesConHoras.length > 0 && (
+                          <span className="d-block text-muted" style={{ fontSize: 11 }}>
+                            {totalHorasEstimadas.toFixed(1)}h estimadas
+                          </span>
+                          {fasesProyecto.length > 0 && (
                             <span className="d-block text-muted" style={{ fontSize: 11 }}>
-                              {fasesConHoras.length} fase{fasesConHoras.length !== 1 ? "s" : ""}
+                              {fasesProyecto.length} fase{fasesProyecto.length !== 1 ? "s" : ""}
                             </span>
                           )}
                         </td>
@@ -737,6 +788,7 @@ const PropietarioView = () => {
       <ProyectoDetailModal
         proyecto={selected}
         horasResumen={selected ? getResumenVisible(selected.id_proyecto) : []}
+        fases={selected ? (fasesByProyecto[selected.id_proyecto] || []) : []}
         horasLoading={loadingHoras}
         horasError={horasError}
         onClose={() => setSelected(null)}
@@ -749,6 +801,7 @@ const PropietarioView = () => {
               embedded
               proyectoId={contentModal.proyecto.id_proyecto}
               horasResumen={horasResumenByProyecto[contentModal.proyecto.id_proyecto] || []}
+              onChanged={fetch}
               onClose={() => setContentModal(null)}
             />
           ) : (
@@ -785,6 +838,7 @@ const LiderView = () => {
   const [contentModal, setContentModal] = useState(null);
   const [search, setSearch] = useState("");
   const [horasByProyecto, setHorasByProyecto] = useState({});
+  const [fasesByProyecto, setFasesByProyecto] = useState({});
   const [loadingHoras, setLoadingHoras] = useState(false);
   const [horasError, setHorasError] = useState("");
 
@@ -806,6 +860,7 @@ const LiderView = () => {
         setProyectos([]);
         setError("No se pudieron cargar tus proyectos.");
         setHorasByProyecto({});
+        setFasesByProyecto({});
         return;
       }
 
@@ -823,10 +878,23 @@ const LiderView = () => {
         })
       );
 
+      const fasesEntries = await Promise.all(
+        proyectosList.map(async (proyecto) => {
+          try {
+            const fases = await getFasesByProyecto(proyecto.id_proyecto);
+            return [proyecto.id_proyecto, normalizeProyectoFases(fases)];
+          } catch {
+            return [proyecto.id_proyecto, []];
+          }
+        })
+      );
+
       setHorasByProyecto(Object.fromEntries(resumenEntries));
+      setFasesByProyecto(Object.fromEntries(fasesEntries));
     } catch {
       setProyectos([]);
       setHorasByProyecto({});
+      setFasesByProyecto({});
       setError("Error al conectar con el servidor.");
       setHorasError("");
     } finally {
@@ -865,6 +933,11 @@ const LiderView = () => {
   const getResumenProyecto = useCallback(
     (proyectoId) => horasByProyecto[proyectoId] || [],
     [horasByProyecto]
+  );
+
+  const getFasesProyecto = useCallback(
+    (proyectoId) => fasesByProyecto[proyectoId] || [],
+    [fasesByProyecto]
   );
 
   const filtered = proyectos.filter((p) =>
@@ -925,7 +998,8 @@ const LiderView = () => {
                     const active = isProyectoActivo(p);
                     const resumenProyecto = getResumenProyecto(p.id_proyecto);
                     const totalHorasProyecto = getTotalHorasResumen(resumenProyecto);
-                    const fasesConHoras = groupHorasByFase(resumenProyecto);
+                    const fasesProyecto = getFasesProyecto(p.id_proyecto);
+                    const totalHorasEstimadas = getTotalHorasEstimadas(fasesProyecto);
                     return (
                       <tr key={p.id_proyecto} className="animate-fadeIn" style={{ cursor: "pointer" }} onClick={() => setSelected(p)}>
                         <td><i className="bi bi-chevron-right" style={{ color: "var(--primary)", fontSize: 12 }}></i></td>
@@ -946,9 +1020,12 @@ const LiderView = () => {
                           <span className="fw-bold" style={{ color: "var(--primary)" }}>
                             {loadingHoras ? "..." : `${totalHorasProyecto.toFixed(1)}h`}
                           </span>
-                          {fasesConHoras.length > 0 && (
+                          <span className="d-block text-muted" style={{ fontSize: 11 }}>
+                            {totalHorasEstimadas.toFixed(1)}h estimadas
+                          </span>
+                          {fasesProyecto.length > 0 && (
                             <span className="d-block text-muted" style={{ fontSize: 11 }}>
-                              {fasesConHoras.length} fase{fasesConHoras.length !== 1 ? "s" : ""}
+                              {fasesProyecto.length} fase{fasesProyecto.length !== 1 ? "s" : ""}
                             </span>
                           )}
                         </td>
@@ -1002,6 +1079,7 @@ const LiderView = () => {
       <ProyectoDetailModal
         proyecto={selected}
         horasResumen={selected ? getResumenProyecto(selected.id_proyecto) : []}
+        fases={selected ? getFasesProyecto(selected.id_proyecto) : []}
         horasLoading={loadingHoras}
         horasError={horasError}
         onClose={() => setSelected(null)}
@@ -1013,6 +1091,7 @@ const LiderView = () => {
               embedded
               proyectoId={contentModal.proyecto.id_proyecto}
               horasResumen={getResumenProyecto(contentModal.proyecto.id_proyecto)}
+              onChanged={fetch}
               onClose={() => setContentModal(null)}
             />
           ) : (
@@ -1073,59 +1152,67 @@ const EmpleadoView = () => {
   const [horasByProyecto, setHorasByProyecto] = useState({});
   const [fasesByProyecto, setFasesByProyecto] = useState({});
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const proyectosRes = await getMisProyectos();
-        if (proyectosRes?.success) {
-          const proyectoList = proyectosRes.data || [];
-          setProyectos(proyectoList);
-        } else {
-          setError("No se pudieron cargar tus proyectos.");
-        }
-      } catch {
-        setError("Error al conectar con el servidor.");
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    let proyectoList = [];
+
+    try {
+      const proyectosRes = await getMisProyectos();
+      if (proyectosRes?.success) {
+        proyectoList = proyectosRes.data || [];
+        setProyectos(proyectoList);
+      } else {
+        setError("No se pudieron cargar tus proyectos.");
       }
+    } catch {
+      setError("Error al conectar con el servidor.");
+    }
 
-      try {
-        const horasRes = await getHoras();
-        const horasData = Array.isArray(horasRes)
-          ? horasRes
-          : (horasRes?.success && Array.isArray(horasRes.data) ? horasRes.data : []);
+    try {
+      const horasRes = await getHoras();
+      const horasData = Array.isArray(horasRes)
+        ? horasRes
+        : (horasRes?.success && Array.isArray(horasRes.data) ? horasRes.data : []);
 
-        const horasMap = {};
-        const fasesMap = {};
+      const horasMap = {};
 
-        horasData.forEach((registro) => {
-          const proyectoId = Number(registro.id_proyecto);
-          if (!proyectoId) return;
+      horasData.forEach((registro) => {
+        const proyectoId = Number(registro.id_proyecto);
+        if (!proyectoId) return;
 
-          horasMap[proyectoId] = Number(horasMap[proyectoId] || 0) + Number(registro.horas || 0);
+        horasMap[proyectoId] = Number(horasMap[proyectoId] || 0) + Number(registro.horas || 0);
+      });
 
-          const faseNombre = registro.fase || registro.fase_nombre;
-          if (faseNombre) {
-            if (!fasesMap[proyectoId]) fasesMap[proyectoId] = new Set();
-            fasesMap[proyectoId].add(faseNombre);
+      setHorasByProyecto(horasMap);
+    } catch {
+      // Si falla horas, no bloqueamos la vista de proyectos.
+      setHorasByProyecto({});
+    }
+
+    try {
+      const fasesEntries = await Promise.all(
+        proyectoList.map(async (proyecto) => {
+          try {
+            const fases = await getFasesByProyecto(proyecto.id_proyecto);
+            return [proyecto.id_proyecto, normalizeProyectoFases(fases)];
+          } catch {
+            return [proyecto.id_proyecto, []];
           }
-        });
+        })
+      );
 
-        const fasesNormalized = Object.fromEntries(
-          Object.entries(fasesMap).map(([id, fases]) => [id, Array.from(fases)])
-        );
-
-        setHorasByProyecto(horasMap);
-        setFasesByProyecto(fasesNormalized);
-      } catch {
-        // Si falla horas, no bloqueamos la vista de proyectos.
-        setHorasByProyecto({});
-        setFasesByProyecto({});
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
+      setFasesByProyecto(Object.fromEntries(fasesEntries));
+    } catch {
+      setFasesByProyecto({});
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const proyectosConResumen = proyectos.map((p) => {
     const fases = fasesByProyecto[p.id_proyecto] || [];
@@ -1137,15 +1224,24 @@ const EmpleadoView = () => {
   });
 
   const fasesDisponibles = Array.from(
-    new Set(proyectosConResumen.flatMap((p) => p.fases || []))
-  ).sort((a, b) => a.localeCompare(b));
+    proyectosConResumen
+      .flatMap((p) => p.fases || [])
+      .reduce((map, fase) => {
+        const key = String(getFaseId(fase) ?? getFaseNombre(fase));
+        if (!map.has(key)) map.set(key, getFaseNombre(fase));
+        return map;
+      }, new Map())
+      .entries()
+  ).sort((a, b) => a[1].localeCompare(b[1]));
 
   const filtered = proyectosConResumen.filter((p) => {
     const text = search.trim().toLowerCase();
     const matchText = !text ||
       p.nombre?.toLowerCase().includes(text) ||
       (p.descripcion || "").toLowerCase().includes(text);
-    const matchFase = !faseFilter || (p.fases || []).includes(faseFilter);
+    const matchFase = !faseFilter || (p.fases || []).some((fase) =>
+      String(getFaseId(fase) ?? getFaseNombre(fase)) === faseFilter
+    );
     return matchText && matchFase;
   });
 
@@ -1181,8 +1277,8 @@ const EmpleadoView = () => {
               onChange={(e) => setFaseFilter(e.target.value)}
             >
               <option value="">Todas las fases</option>
-              {fasesDisponibles.map((fase) => (
-                <option key={fase} value={fase}>{fase}</option>
+              {fasesDisponibles.map(([id, nombre]) => (
+                <option key={id} value={id}>{nombre}</option>
               ))}
             </select>
           </div>
@@ -1253,7 +1349,12 @@ const EmpleadoView = () => {
                           {p.servicio_nombre && <small className="text-muted">{p.servicio_nombre}</small>}
                         </td>
                         <td className="text-muted small">
-                          {p.fases?.length ? p.fases.join(", ") : "—"}
+                          {p.fases?.length ? p.fases.map(getFaseNombre).join(", ") : "—"}
+                          {getTotalHorasEstimadas(p.fases) > 0 && (
+                            <small className="d-block text-muted">
+                              {getTotalHorasEstimadas(p.fases).toFixed(1)}h estimadas
+                            </small>
+                          )}
                         </td>
                         <td>
                           <span className="fw-bold" style={{ color: "var(--primary)" }}>
@@ -1297,8 +1398,12 @@ const EmpleadoView = () => {
 
       {horasProyecto !== null && (
         <HorasForm
-          proyectoPreseleccionado={horasProyecto?.id_proyecto || null}
-          onSaved={() => setHorasProyecto(null)}
+          proyectoPreseleccionado={horasProyecto}
+          fasesPreseleccionadas={horasProyecto?.fases || []}
+          onSaved={() => {
+            setHorasProyecto(null);
+            fetchData();
+          }}
           onCancel={() => setHorasProyecto(null)}
         />
       )}

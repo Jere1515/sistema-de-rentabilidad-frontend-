@@ -4,13 +4,22 @@ import { getProyectosDisponibles } from "../../services/proyectoService";
 import { getFasesByProyecto } from "../../services/faseService"; // Asegúrate de que exista en tu faseService o cámbialo por el nombre correcto
 import { notifySuccess } from "../../utils/notify";
 
-const today = () => new Date().toISOString().split("T")[0];
+const today = () => {
+  const date = new Date();
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return localDate.toISOString().split("T")[0];
+};
 
-const HorasForm = ({ idRegistroEdicion, proyectoPreseleccionado, onSaved, onCancel, forceRequired = false }) => {
+const HorasForm = ({ idRegistroEdicion, proyectoPreseleccionado, fasesPreseleccionadas = [], onSaved, onCancel, forceRequired = false }) => {
+  const proyectoInicial =
+    proyectoPreseleccionado && typeof proyectoPreseleccionado === "object"
+      ? proyectoPreseleccionado
+      : null;
+  const proyectoInicialId = proyectoInicial?.id_proyecto || proyectoPreseleccionado || "";
   const [proyectos, setProyectos] = useState([]);
   const [fases, setFases] = useState([]);
   const [form, setForm] = useState({
-    id_proyecto: proyectoPreseleccionado || "",
+    id_proyecto: proyectoInicialId,
     id_fase: "",
     fecha: today(),
     horas: 1,
@@ -19,17 +28,29 @@ const HorasForm = ({ idRegistroEdicion, proyectoPreseleccionado, onSaved, onCanc
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const isProjectLocked = Boolean(proyectoPreseleccionado);
+  const isProjectLocked = Boolean(proyectoInicialId);
   const isEdicion = Boolean(idRegistroEdicion);
 
   // 1. Cargar proyectos disponibles al montar el componente
   useEffect(() => {
     getProyectosDisponibles()
       .then((res) => {
-        if (res?.success) setProyectos(res.data);
+        const rawData = res?.success ? res.data : res;
+        const data = Array.isArray(rawData) ? rawData : [];
+        const proyectoYaIncluido = data.some(
+          (p) => String(p.id_proyecto) === String(proyectoInicialId)
+        );
+
+        if (proyectoInicial && !proyectoYaIncluido) {
+          setProyectos([proyectoInicial, ...data]);
+        } else {
+          setProyectos(data);
+        }
       })
-      .catch(() => {});
-  }, []);
+      .catch(() => {
+        if (proyectoInicial) setProyectos([proyectoInicial]);
+      });
+  }, [proyectoInicial, proyectoInicialId]);
 
   // 2. Lógica para HU 33 (Edición): Precargar los datos si recibimos un idRegistroEdicion
   useEffect(() => {
@@ -67,15 +88,14 @@ const HorasForm = ({ idRegistroEdicion, proyectoPreseleccionado, onSaved, onCanc
       getFasesByProyecto(form.id_proyecto)
         .then((res) => {
           // Adaptar según la estructura que devuelva tu endpoint de fases (usualmente res.data o res)
-          if (res?.success) setFases(res.data);
-          else if (Array.isArray(res)) setFases(res);
-          else setFases([]);
+          const rawData = res?.success ? res.data : res;
+          setFases(Array.isArray(rawData) ? rawData : []);
         })
-        .catch(() => setFases([]));
+        .catch(() => setFases(fasesPreseleccionadas));
     } else {
       setFases([]);
     }
-  }, [form.id_proyecto]);
+  }, [form.id_proyecto, fasesPreseleccionadas]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -192,7 +212,9 @@ const HorasForm = ({ idRegistroEdicion, proyectoPreseleccionado, onSaved, onCanc
             >
               <option value="">— Selecciona una fase —</option>
               {fases.map((f) => (
-                <option key={f.id_fase} value={f.id_fase}>{f.nombre || f.fase_nombre}</option>
+                <option key={f.id_fase || f.id} value={f.id_fase || f.id}>
+                  {f.nombre || f.fase_nombre || f.nombre_fase}
+                </option>
               ))}
             </select>
             {!form.id_proyecto && (
@@ -211,7 +233,7 @@ const HorasForm = ({ idRegistroEdicion, proyectoPreseleccionado, onSaved, onCanc
               className="form-control"
               required
               max={today()}
-              disabled={isEdicion} // El backend bloquea el cambio de fecha indirectamente al evaluar límites de días fijos
+              disabled
             />
           </div>
 
