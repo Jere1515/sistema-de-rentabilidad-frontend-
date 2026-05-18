@@ -10,6 +10,14 @@ import { finalizarProyecto, getHorasResumenProyecto, getMisProyectos } from "../
 import { notifyError, notifySuccess } from "../../utils/notify";
 import { getServicioNombre, getTotalHorasEstimadas, getTotalHorasResumen, isProyectoActivo, normalizeHorasResumen, normalizeProyectoFases } from "./projectUtils";
 
+const getTodayDateValue = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const LiderProjectsView = () => {
   const [proyectos, setProyectos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -25,7 +33,6 @@ const LiderProjectsView = () => {
   // --- NUEVOS ESTADOS PARA H37 ---
   const [showFinalizarModal, setShowFinalizarModal] = useState(false);
   const [proyectoAFinalizar, setProyectoAFinalizar] = useState(null);
-  const [fechaFinReal, setFechaFinReal] = useState(new Date().toISOString().split('T')[0]);
 
   const fetch = useCallback(async () => {
     setLoading(true);
@@ -91,9 +98,8 @@ const LiderProjectsView = () => {
 
     try {
       setLoading(true);
-      // Enviamos el ID y el objeto con la fecha fin real
       const res = await finalizarProyecto(proyectoAFinalizar.id_proyecto, { 
-        fecha_fin_real: fechaFinReal 
+        fecha_fin_real: getTodayDateValue()
       });
 
       if (res.success) {
@@ -301,9 +307,9 @@ const LiderProjectsView = () => {
                 <input 
                   type="date" 
                   className="form-control form-control-sm"
-                  value={fechaFinReal}
-                  max={new Date().toISOString().split('T')[0]} // No permite fechas futuras
-                  onChange={(e) => setFechaFinReal(e.target.value)}
+                  value={getTodayDateValue()}
+                  disabled
+                  readOnly
                 />
               </div>
 
