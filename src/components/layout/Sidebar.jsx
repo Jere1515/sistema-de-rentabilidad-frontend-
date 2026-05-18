@@ -78,9 +78,10 @@ const Sidebar = () => {
       className="d-flex flex-column"
       style={{
         width: 250,
-        minHeight: "100vh",
+        height: "100vh",
         position: "sticky",
         top: 0,
+        overflow: "hidden",
         background: "linear-gradient(180deg,#0F0C29 0%,#302B63 50%,#24243e 100%)",
         boxShadow: "4px 0 30px rgba(15,12,41,.5)",
         zIndex: 200,

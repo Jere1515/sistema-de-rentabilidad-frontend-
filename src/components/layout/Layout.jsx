@@ -13,7 +13,7 @@ const Layout = ({ children }) => {
     <div className="d-flex" style={{ height: "100vh", overflow: "hidden", background: "var(--bg)" }}>
       <Sidebar />
 
-      <div className="flex-grow-1 d-flex flex-column overflow-hidden">
+      <div className="flex-grow-1 d-flex flex-column overflow-hidden" style={{ minWidth: 0 }}>
         {/* Topbar */}
         <header
           className="d-flex justify-content-between align-items-center px-4"
@@ -25,6 +25,7 @@ const Layout = ({ children }) => {
             position: "sticky",
             top: 0,
             zIndex: 100,
+            flexShrink: 0,
           }}
         >
           <span className="fw-bold gradient-text" style={{ fontSize: 16 }}>
