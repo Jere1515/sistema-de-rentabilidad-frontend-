@@ -3,12 +3,17 @@ import { useNavigate } from "react-router-dom";
 import { getMisMarcajes, marcarEntrada, marcarSalida } from "../../services/horasService";
 import { notifyError, notifySuccess } from "../../utils/notify";
 
-const getTodayKey = () => {
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Lima" });
-  return `marcaje_${today}`;
+const getTodayDate = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 };
 
-const getTodayDate = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Lima" });
+const getTodayUtcDate = () => new Date().toISOString().slice(0, 10);
+
+const getTodayKey = () => `marcaje_${getTodayDate()}`;
 
 const ButtonMarcaje = () => {
   const navigate = useNavigate();
@@ -22,11 +27,18 @@ const ButtonMarcaje = () => {
     try {
       const res = await getMisMarcajes();
       const list = Array.isArray(res?.data) ? res.data : [];
-      const hoy = getTodayDate();
-      const deHoy = list.find((m) => m?.fecha?.slice(0, 10) === hoy);
+      const hoyLocal = getTodayDate();
+      const hoyUtc = getTodayUtcDate();
+      const fechaSet = new Set([hoyLocal, hoyUtc]);
 
-      const entrada = Boolean(deHoy?.hora_entrada);
-      const salida = Boolean(deHoy?.hora_salida);
+      const deHoy = list.find((item) => fechaSet.has(String(item?.fecha || "").slice(0, 10)));
+
+      // Fallback robusto: si hay entrada abierta en cualquier fecha,
+      // siempre debe permitir marcar salida al reingresar.
+      const abierta = list.find((item) => Boolean(item?.hora_entrada) && !item?.hora_salida);
+
+      const entrada = Boolean((deHoy || abierta)?.hora_entrada);
+      const salida = Boolean((deHoy || abierta)?.hora_salida);
 
       setMarcaje({ entrada, salida });
       localStorage.setItem(storageKey, JSON.stringify({ entrada, salida }));
@@ -63,6 +75,7 @@ const ButtonMarcaje = () => {
       setMensaje(okMessage);
       localStorage.setItem(storageKey, JSON.stringify({ entrada: true, salida: false }));
       notifySuccess(okMessage);
+      await cargarEstadoMarcaje();
     } catch (error) {
       const errorMessage = error?.response?.data?.message || "No se pudo registrar la entrada.";
       setEstado("error");
@@ -90,6 +103,7 @@ const ButtonMarcaje = () => {
       setMensaje(okMessage);
       localStorage.setItem(storageKey, JSON.stringify({ entrada: true, salida: true }));
       notifySuccess(okMessage);
+      await cargarEstadoMarcaje();
 
       navigate("/mis-horas?registrar=true&obligatorio=1", { replace: false });
     } catch (error) {
@@ -130,7 +144,7 @@ const ButtonMarcaje = () => {
       {marcaje.entrada && marcaje.salida && (
         <button className="btn btn-sm w-100 btn-secondary fw-bold" disabled>
           <i className="bi bi-check2-circle me-2"></i>
-          Marcaje Realizado
+          Se registro tu marcaje
         </button>
       )}
 

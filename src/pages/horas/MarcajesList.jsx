@@ -13,13 +13,38 @@ const formatHoraLocal = (value) => {
       minute: "2-digit",
       second: "2-digit",
       hour12: false,
-      timeZone: "America/Lima",
     });
   }
 
   const raw = String(value);
   const hhmmss = raw.match(/\b\d{2}:\d{2}:\d{2}\b/);
   return hhmmss ? hhmmss[0] : raw;
+};
+
+const formatFechaLocal = (value) => {
+  if (!value) return "--";
+  const raw = String(value).slice(0, 10);
+  const parts = raw.split("-");
+  if (parts.length === 3) {
+    const [y, m, d] = parts.map(Number);
+    const localDate = new Date(y, (m || 1) - 1, d || 1);
+    return localDate.toLocaleDateString("es-PE", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  }
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString("es-PE", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  }
+  return raw;
 };
 
 const MarcajesList = () => {
@@ -88,9 +113,7 @@ const MarcajesList = () => {
                   marcajes.map((m) => (
                     <tr key={m.id_marcaje} className="animate-fadeIn">
                       <td className="ps-4 fw-semibold text-dark">
-                        {new Date(m.fecha).toLocaleDateString("es-PE", { 
-                          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
-                        })}
+                        {formatFechaLocal(m.fecha)}
                       </td>
                       <td>
                         <span className="badge bg-success-subtle text-success border border-success-subtle px-3 py-2 rounded-3">
