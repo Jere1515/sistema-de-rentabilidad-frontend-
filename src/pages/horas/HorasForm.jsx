@@ -1,24 +1,28 @@
 import React, { useState, useEffect } from "react";
-import { createHora } from "../../services/horasService";
+import { createHora, updateHora, getMisHoras } from "../../services/horasService";
 import { getProyectosDisponibles } from "../../services/proyectoService";
+import { getFasesByProyecto } from "../../services/faseService"; // Asegúrate de que exista en tu faseService o cámbialo por el nombre correcto
 import { notifySuccess } from "../../utils/notify";
 
 const today = () => new Date().toISOString().split("T")[0];
 
-const HorasForm = ({ proyectoPreseleccionado, onSaved, onCancel, forceRequired = false }) => {
+const HorasForm = ({ idRegistroEdicion, proyectoPreseleccionado, onSaved, onCancel, forceRequired = false }) => {
   const [proyectos, setProyectos] = useState([]);
+  const [fases, setFases] = useState([]);
   const [form, setForm] = useState({
     id_proyecto: proyectoPreseleccionado || "",
+    id_fase: "",
     fecha: today(),
-    horas_base: 1,
-    horas_extra: 0,
+    horas: 1,
     descripcion: "",
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const isProjectLocked = Boolean(proyectoPreseleccionado);
+  const isEdicion = Boolean(idRegistroEdicion);
 
+  // 1. Cargar proyectos disponibles al montar el componente
   useEffect(() => {
     getProyectosDisponibles()
       .then((res) => {
@@ -27,12 +31,56 @@ const HorasForm = ({ proyectoPreseleccionado, onSaved, onCancel, forceRequired =
       .catch(() => {});
   }, []);
 
+  // 2. Lógica para HU 33 (Edición): Precargar los datos si recibimos un idRegistroEdicion
+  useEffect(() => {
+    if (isEdicion) {
+      setLoading(true);
+      getMisHoras()
+        .then((res) => {
+          const registros = Array.isArray(res) ? res : res?.data || [];
+          // Buscamos el registro específico que queremos editar
+          const registroAEditar = registros.find(
+            (r) => (r.id_registro || r.id) === idRegistroEdicion
+          );
+
+          if (registroAEditar) {
+            setForm({
+              id_proyecto: registroAEditar.id_proyecto || "",
+              id_fase: registroAEditar.id_fase || "",
+              fecha: registroAEditar.fecha ? registroAEditar.fecha.split("T")[0] : today(),
+              horas: Number(registroAEditar.horas || 1),
+              descripcion: registroAEditar.descripcion || "",
+            });
+          } else {
+            setError("No se encontraron los datos del registro a editar.");
+          }
+        })
+        .catch((err) => setError("Error al precargar los datos de edición."))
+        .finally(() => setLoading(false));
+    }
+  }, [idRegistroEdicion, isEdicion]);
+
+  // 3. HU 32: Cargar fases automáticamente cada vez que cambie o se seleccione un proyecto
+  useEffect(() => {
+    if (form.id_proyecto) {
+      // Consumimos el endpoint de fases del proyecto seleccionado
+      getFasesByProyecto(form.id_proyecto)
+        .then((res) => {
+          // Adaptar según la estructura que devuelva tu endpoint de fases (usualmente res.data o res)
+          if (res?.success) setFases(res.data);
+          else if (Array.isArray(res)) setFases(res);
+          else setFases([]);
+        })
+        .catch(() => setFases([]));
+    } else {
+      setFases([]);
+    }
+  }, [form.id_proyecto]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((p) => ({ ...p, [name]: value }));
   };
-
-  const totalHoras = Number(form.horas_base) + Number(form.horas_extra || 0);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -42,27 +90,43 @@ const HorasForm = ({ proyectoPreseleccionado, onSaved, onCancel, forceRequired =
       setError("Selecciona un proyecto.");
       return;
     }
-    if (totalHoras < 1 || totalHoras > 18) {
-      setError("El total de horas debe estar entre 1 y 18.");
+    if (!form.id_fase) {
+      setError("Selecciona una fase asociada al proyecto.");
+      return;
+    }
+    if (Number(form.horas) <= 0 || Number(form.horas) > 24) {
+      setError("El número de horas diarias debe ser mayor a 0 y no puede exceder las 24 horas.");
       return;
     }
 
     setLoading(true);
     try {
-      const res = await createHora({
+      // Datos estructurados tal como los espera el backend en horas.repository.js (create y update)
+      const dataPayload = {
         id_proyecto: Number(form.id_proyecto),
+        id_fase: Number(form.id_fase),
         fecha: form.fecha,
-        horas: totalHoras,
+        horas: Number(form.horas),
         descripcion: form.descripcion || null,
-      });
-      if (res?.success) {
-        notifySuccess("¡Horas registradas correctamente!");
+      };
+
+      let response;
+      if (isEdicion) {
+        // HU 33: Consumir endpoint de edición pasándole la ID
+        response = await updateHora(idRegistroEdicion, dataPayload);
+      } else {
+        // HU 32: Consumir endpoint de creación
+        response = await createHora(dataPayload);
+      }
+
+      if (response?.success || response) {
+        notifySuccess(isEdicion ? "¡Registro actualizado con éxito!" : "¡Horas registradas correctamente!");
         onSaved?.();
       } else {
-        setError(res?.message || "Error al guardar el registro.");
+        setError("Error al procesar la solicitud.");
       }
     } catch (err) {
-      setError(err.response?.data?.message || "Error al guardar el registro.");
+      setError(err.response?.data?.message || "Error al guardar el registro en el servidor.");
     } finally {
       setLoading(false);
     }
@@ -73,11 +137,11 @@ const HorasForm = ({ proyectoPreseleccionado, onSaved, onCancel, forceRequired =
       <div className="modal-card p-4 animate-scaleIn">
         <div className="d-flex justify-content-between align-items-center mb-4">
           <div>
-            <h5 className="fw-bold mb-0">Registrar Horas</h5>
-            <p className="text-muted small mb-0">Ingresa las horas trabajadas en el proyecto</p>
+            <h5 className="fw-bold mb-0">{isEdicion ? "Editar Horas" : "Registrar Horas"}</h5>
+            <p className="text-muted small mb-0">Imputación de tiempos para el control de rentabilidad</p>
           </div>
           {!forceRequired && (
-            <button className="btn btn-sm btn-light rounded-circle p-1 lh-1" onClick={onCancel}>
+            <button className="btn btn-sm btn-light rounded-circle p-1 lh-1" type="button" onClick={onCancel}>
               <i className="bi bi-x-lg"></i>
             </button>
           )}
@@ -97,6 +161,7 @@ const HorasForm = ({ proyectoPreseleccionado, onSaved, onCancel, forceRequired =
         )}
 
         <form onSubmit={handleSubmit}>
+          {/* Campo: Proyecto */}
           <div className="mb-3">
             <label className="form-label fw-semibold small">Proyecto *</label>
             <select
@@ -105,20 +170,37 @@ const HorasForm = ({ proyectoPreseleccionado, onSaved, onCancel, forceRequired =
               onChange={handleChange}
               className="form-select"
               required
-              disabled={isProjectLocked}
+              disabled={isProjectLocked || isEdicion}
             >
               <option value="">— Selecciona un proyecto —</option>
               {proyectos.map((p) => (
                 <option key={p.id_proyecto} value={p.id_proyecto}>{p.nombre}</option>
               ))}
             </select>
-            {isProjectLocked && (
-              <div className="form-text small" style={{ color: "var(--primary)" }}>
-                <i className="bi bi-lock-fill me-1"></i>Proyecto pre-seleccionado desde tu lista.
-              </div>
+          </div>
+
+          {/* Campo: Fase (Requerido por HU 32 y Backend) */}
+          <div className="mb-3">
+            <label className="form-label fw-semibold small">Fase del Proyecto *</label>
+            <select
+              name="id_fase"
+              value={form.id_fase}
+              onChange={handleChange}
+              className="form-select"
+              required
+              disabled={!form.id_proyecto}
+            >
+              <option value="">— Selecciona una fase —</option>
+              {fases.map((f) => (
+                <option key={f.id_fase} value={f.id_fase}>{f.nombre || f.fase_nombre}</option>
+              ))}
+            </select>
+            {!form.id_proyecto && (
+              <div className="form-text text-muted small">Debes seleccionar un proyecto primero para ver sus fases.</div>
             )}
           </div>
 
+          {/* Campo: Fecha */}
           <div className="mb-3">
             <label className="form-label fw-semibold small">Fecha *</label>
             <input
@@ -129,56 +211,29 @@ const HorasForm = ({ proyectoPreseleccionado, onSaved, onCancel, forceRequired =
               className="form-control"
               required
               max={today()}
+              disabled={isEdicion} // El backend bloquea el cambio de fecha indirectamente al evaluar límites de días fijos
             />
           </div>
 
-          <div className="row g-3 mb-3">
-            <div className="col-12 col-sm-6">
-              <label className="form-label fw-semibold small">
-                Horas trabajadas *
-                <span className="text-muted fw-normal ms-1">(1 – 8)</span>
-              </label>
-              <select
-                name="horas_base"
-                value={form.horas_base}
-                onChange={handleChange}
-                className="form-select"
-                required
-              >
-                {[1, 2, 3, 4, 5, 6, 7, 8].map((h) => (
-                  <option key={h} value={h}>{h} hora{h !== 1 ? "s" : ""}</option>
-                ))}
-              </select>
-            </div>
-            <div className="col-12 col-sm-6">
-              <label className="form-label fw-semibold small">
-                Horas extra <span className="text-muted fw-normal">(opcional, 0 – 10)</span>
-              </label>
-              <input
-                type="number"
-                name="horas_extra"
-                value={form.horas_extra}
-                onChange={handleChange}
-                className="form-control"
-                min="0"
-                max="10"
-                step="1"
-                placeholder="0"
-              />
-            </div>
+          {/* Campo: Cantidad de Horas */}
+          <div className="mb-3">
+            <label className="form-label fw-semibold small">Horas a Imputar *</label>
+            <input
+              type="number"
+              name="horas"
+              value={form.horas}
+              onChange={handleChange}
+              className="form-control"
+              min="0.5"
+              max="24"
+              step="0.5"
+              required
+              placeholder="Ej. 7.5"
+            />
+            <div className="form-text text-muted small">Registra el tiempo total (ej. 8 horas de jornada o sobretiempos).</div>
           </div>
 
-          <div className="mb-3 p-2 rounded-3 d-flex align-items-center gap-2"
-            style={{ background: "rgba(79,70,229,.06)" }}>
-            <i className="bi bi-clock-fill" style={{ color: "var(--primary)" }}></i>
-            <span className="small fw-semibold" style={{ color: "var(--primary)" }}>
-              Total a registrar:
-            </span>
-            <span className="badge badge-role badge-active ms-auto" style={{ fontSize: 13 }}>
-              {totalHoras} hora{totalHoras !== 1 ? "s" : ""}
-            </span>
-          </div>
-
+          {/* Campo: Descripción */}
           <div className="mb-4">
             <label className="form-label fw-semibold small">Descripción de la tarea</label>
             <textarea
@@ -198,9 +253,11 @@ const HorasForm = ({ proyectoPreseleccionado, onSaved, onCancel, forceRequired =
               </button>
             )}
             <button type="submit" className="btn btn-primary flex-fill" disabled={loading}>
-              {loading
-                ? <><span className="spinner-border spinner-border-sm me-2"></span>Guardando...</>
-                : <><i className="bi bi-clock-history me-2"></i>Registrar {totalHoras}h</>}
+              {loading ? (
+                <><span className="spinner-border spinner-border-sm me-2"></span>Guardando...</>
+              ) : (
+                <><i className="bi bi-check-circle me-2"></i>{isEdicion ? "Guardar Cambios" : "Confirmar Registro"}</>
+              )}
             </button>
           </div>
         </form>

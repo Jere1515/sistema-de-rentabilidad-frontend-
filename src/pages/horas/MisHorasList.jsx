@@ -2,8 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import Layout from "../../components/layout/Layout";
 import HorasForm from "./HorasForm";
-import { getMisHoras } from "../../services/horasService";
-import { notifyInfo } from "../../utils/notify";
+import { getMisHoras, deleteHora } from "../../services/horasService";
+import { notifyInfo, notifySuccess, notifyError } from "../../utils/notify";
 
 const getHorasData = (response) => {
   if (Array.isArray(response)) return response;
@@ -12,7 +12,7 @@ const getHorasData = (response) => {
 };
 
 const getRegistroId = (registro, index) =>
-  registro.id ?? registro.id_registro ?? index;
+  registro.id_registro ?? registro.id ?? index;
 
 const MisHorasList = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -20,6 +20,7 @@ const MisHorasList = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [selectedHoraId, setSelectedHoraId] = useState(null); // Estado para rastrear el ID en Edición (HU 33)
   const [filterFase, setFilterFase] = useState("");
 
   const registroObligatorio = useMemo(
@@ -64,57 +65,46 @@ const MisHorasList = () => {
   useEffect(() => {
     if (searchParams.get("registrar") === "true") {
       setShowForm(true);
+      setSelectedHoraId(null);
     }
   }, [searchParams]);
 
-  const resumenHoras = useMemo(() => {
-    const map = new Map();
-
-    horas.forEach((registro) => {
-      const idProyecto = registro.id_proyecto ?? "sin-proyecto";
-      const idFase = registro.id_fase ?? "sin-fase";
-      const key = `${idProyecto}-${idFase}`;
-
-      const actual = map.get(key) || {
-        id_proyecto: registro.id_proyecto,
-        id_fase: registro.id_fase,
-        proyecto_nombre: registro.proyecto_nombre ?? registro.proyecto ?? "-",
-        fase_nombre: registro.fase_nombre ?? registro.fase ?? "-",
-        total_horas: 0,
-      };
-
-      actual.total_horas += Number(registro.horas ?? 0);
-      map.set(key, actual);
-    });
-
-    return Array.from(map.values());
+  // Aseguramos que cada fila mantenga sus propiedades individuales para las acciones de la HU 30
+  const registrosDetallados = useMemo(() => {
+    return horas.map((r) => ({
+      ...r,
+      id_registro: r.id_registro ?? r.id,
+      horas: Number(r.horas || 0)
+    }));
   }, [horas]);
 
+  // Extraemos las fases únicas basándonos en los registros reales del empleado
   const fasesUnicas = useMemo(() => {
     const map = new Map();
-
-    resumenHoras.forEach((r) => {
+    registrosDetallados.forEach((r) => {
       const id = String(r.id_fase ?? "");
-      if (!map.has(id)) {
-        map.set(id, r.fase_nombre ?? "-");
+      if (id && id !== "undefined" && !map.has(id)) {
+        map.set(id, r.fase_nombre ?? r.fase ?? "-");
       }
     });
-
     return Array.from(map.entries());
-  }, [resumenHoras]);
+  }, [registrosDetallados]);
 
-  const resumenFiltrado = useMemo(() => {
-    if (!filterFase) return resumenHoras;
-    return resumenHoras.filter((r) => String(r.id_fase ?? "") === filterFase);
-  }, [resumenHoras, filterFase]);
+  // Filtramos la lista según la fase seleccionada por el usuario
+  const registrosFiltrados = useMemo(() => {
+    if (!filterFase) return registrosDetallados;
+    return registrosDetallados.filter((r) => String(r.id_fase ?? "") === filterFase);
+  }, [registrosDetallados, filterFase]);
 
+  // Sumamos el total de horas acumuladas de la lista filtrada
   const totalHoras = useMemo(
-    () => resumenFiltrado.reduce((acc, item) => acc + Number(item.total_horas || 0), 0),
-    [resumenFiltrado]
+    () => registrosFiltrados.reduce((acc, item) => acc + Number(item.horas || 0), 0),
+    [registrosFiltrados]
   );
 
   const handleSaved = async () => {
     setShowForm(false);
+    setSelectedHoraId(null);
     await fetchHoras();
 
     if (searchParams.get("registrar") === "true") {
@@ -129,8 +119,37 @@ const MisHorasList = () => {
     }
 
     setShowForm(false);
+    setSelectedHoraId(null);
     if (searchParams.get("registrar") === "true") {
       setSearchParams({});
+    }
+  };
+
+  // Manejador para abrir el formulario en Modo Edición (HU 33)
+  const handleEditClick = (idRegistro) => {
+    if (!idRegistro) {
+      notifyError("No se pudo identificar el ID del registro para editar.");
+      return;
+    }
+    setSelectedHoraId(idRegistro);
+    setShowForm(true);
+  };
+
+  // Manejador para consumir el endpoint de eliminación directa (HU 30)
+  const handleDeleteClick = async (idRegistro) => {
+    if (!idRegistro) {
+      notifyError("No se pudo identificar el ID del registro para eliminar.");
+      return;
+    }
+    
+    if (window.confirm("¿Estás completamente seguro de que deseas eliminar este registro de horas?")) {
+      try {
+        await deleteHora(idRegistro);
+        notifySuccess("Registro de horas eliminado correctamente.");
+        await fetchHoras();
+      } catch (err) {
+        notifyError(err?.response?.data?.message || "Ocurrió un error al intentar eliminar el registro.");
+      }
     }
   };
 
@@ -139,9 +158,16 @@ const MisHorasList = () => {
       <div className="animate-fadeInUp">
         <div className="page-header d-flex justify-content-between align-items-start flex-wrap gap-3">
           <div>
-            <h2 className="fw-bold mb-1">Mis Horas</h2>
-            <p className="text-muted small mb-0">Horas trabajadas registradas por proyecto y fase</p>
+            <h2 className="fw-bold mb-1">Mis Horas Trabajadas</h2>
+            <p className="text-muted small mb-0">Horas registradas de forma detallada por proyecto y fase</p>
           </div>
+          <button 
+            className="btn btn-primary shadow-sm" 
+            type="button"
+            onClick={() => { setSelectedHoraId(null); setShowForm(true); }}
+          >
+            <i className="bi bi-plus-lg me-1"></i> Registrar Horas
+          </button>
         </div>
 
         {registroObligatorio && (
@@ -167,13 +193,13 @@ const MisHorasList = () => {
           >
             <option value="">- Todas las fases -</option>
             {fasesUnicas.map(([id, nombre]) => (
-              <option key={id || nombre} value={id}>{nombre}</option>
+              <option key={id} value={id}>{nombre}</option>
             ))}
           </select>
         </div>
 
         <div className="row g-3 mb-3">
-          <div className="col-12 col-sm-4">
+          <div className="col-12 col-sm-6">
             <div className="stat-card card-3d animate-fadeInUp">
               <div className="d-flex align-items-center gap-3">
                 <div className="rounded-3 d-flex align-items-center justify-content-center"
@@ -181,13 +207,13 @@ const MisHorasList = () => {
                   <i className="bi bi-list-check" style={{ color: "var(--primary)" }}></i>
                 </div>
                 <div>
-                  <p className="text-muted small mb-0">Registros</p>
-                  <h5 className="fw-bold mb-0">{resumenFiltrado.length}</h5>
+                  <p className="text-muted small mb-0">Total Registros</p>
+                  <h5 className="fw-bold mb-0">{registrosFiltrados.length}</h5>
                 </div>
               </div>
             </div>
           </div>
-          <div className="col-12 col-sm-4">
+          <div className="col-12 col-sm-6">
             <div className="stat-card card-3d animate-fadeInUp">
               <div className="d-flex align-items-center gap-3">
                 <div className="rounded-3 d-flex align-items-center justify-content-center"
@@ -195,22 +221,8 @@ const MisHorasList = () => {
                   <i className="bi bi-clock-history" style={{ color: "var(--accent)" }}></i>
                 </div>
                 <div>
-                  <p className="text-muted small mb-0">Total horas</p>
+                  <p className="text-muted small mb-0">Total Horas Acumuladas</p>
                   <h5 className="fw-bold mb-0">{totalHoras.toFixed(1)}h</h5>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="col-12 col-sm-4">
-            <div className="stat-card card-3d animate-fadeInUp">
-              <div className="d-flex align-items-center gap-3">
-                <div className="rounded-3 d-flex align-items-center justify-content-center"
-                  style={{ width: 40, height: 40, background: "rgba(16,185,129,.1)" }}>
-                  <i className="bi bi-diagram-3" style={{ color: "var(--success)" }}></i>
-                </div>
-                <div>
-                  <p className="text-muted small mb-0">Fases</p>
-                  <h5 className="fw-bold mb-0">{fasesUnicas.length}</h5>
                 </div>
               </div>
             </div>
@@ -222,26 +234,31 @@ const MisHorasList = () => {
             <table className="table table-modern mb-0">
               <thead>
                 <tr>
+                  <th>Fecha</th>
                   <th>Proyecto</th>
                   <th>Fase</th>
-                  <th>Total horas</th>
+                  <th>Descripción</th>
+                  <th>Horas</th>
                   <th className="text-end">Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  Array.from({ length: 5 }).map((_, i) => (
+                  Array.from({ length: 4 }).map((_, i) => (
                     <tr key={i}>
-                      {Array.from({ length: 4 }).map((__, j) => (
+                      {Array.from({ length: 6 }).map((__, j) => (
                         <td key={j}>
-                          <div className="skeleton rounded" style={{ height: 20, width: "80%" }}></div>
+                          <div className="skeleton rounded" style={{ height: 20, width: "90%" }}></div>
                         </td>
                       ))}
                     </tr>
                   ))
-                ) : resumenFiltrado.length > 0 ? (
-                  resumenFiltrado.map((registro, index) => (
+                ) : registrosFiltrados.length > 0 ? (
+                  registrosFiltrados.map((registro, index) => (
                     <tr key={getRegistroId(registro, index)} className="animate-fadeIn">
+                      <td className="small text-muted">
+                        {registro.fecha ? new Date(registro.fecha).toLocaleDateString() : "-"}
+                      </td>
                       <td>
                         <div className="d-flex align-items-center gap-2">
                           <div className="rounded-3 d-flex align-items-center justify-content-center"
@@ -249,26 +266,39 @@ const MisHorasList = () => {
                             <i className="bi bi-kanban" style={{ color: "var(--primary)", fontSize: 13 }}></i>
                           </div>
                           <span className="fw-semibold">
-                            {registro.proyecto ?? registro.proyecto_nombre ?? "-"}
+                            {registro.proyecto_nombre ?? registro.proyecto ?? "-"}
                           </span>
                         </div>
                       </td>
-                      <td className="text-muted">
+                      <td>
                         <span className="badge rounded-pill" style={{ background: "rgba(6,182,212,.12)", color: "var(--accent)" }}>
-                          {registro.fase ?? registro.fase_nombre ?? "-"}
+                          {registro.fase_nombre ?? registro.fase ?? "-"}
                         </span>
+                      </td>
+                      <td className="text-muted small" style={{ maxWidth: "250px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {registro.descripcion || <span className="text-light-muted italic">Sin descripción</span>}
                       </td>
                       <td>
                         <span className="fw-bold" style={{ color: "var(--primary)" }}>
-                          {Number(registro.total_horas || 0).toFixed(1)}h
+                          {registro.horas.toFixed(1)}h
                         </span>
                       </td>
                       <td className="text-end">
                         <div className="d-flex gap-2 justify-content-end">
-                          <button className="btn btn-sm btn-success shadow-sm" type="button" title="Editar">
+                          <button 
+                            className="btn btn-sm btn-success shadow-sm" 
+                            type="button" 
+                            title="Editar registro"
+                            onClick={() => handleEditClick(registro.id_registro)}
+                          >
                             <i className="bi bi-pencil-square"></i>
                           </button>
-                          <button className="btn btn-sm btn-danger shadow-sm" type="button" title="Eliminar">
+                          <button 
+                            className="btn btn-sm btn-danger shadow-sm" 
+                            type="button" 
+                            title="Eliminar registro"
+                            onClick={() => handleDeleteClick(registro.id_registro)}
+                          >
                             <i className="bi bi-trash-fill"></i>
                           </button>
                         </div>
@@ -277,11 +307,11 @@ const MisHorasList = () => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="4">
+                    <td colSpan="6">
                       <div className="empty-state">
                         <i className="bi bi-clock-history"></i>
                         <h6>Sin horas registradas</h6>
-                        <p>No se encontraron datos para mostrar.</p>
+                        <p>No se encontraron registros de tiempos para mostrar.</p>
                       </div>
                     </td>
                   </tr>
@@ -294,6 +324,7 @@ const MisHorasList = () => {
 
       {showForm && (
         <HorasForm
+          idRegistroEdicion={selectedHoraId}
           proyectoPreseleccionado={null}
           onSaved={handleSaved}
           onCancel={handleCancel}
