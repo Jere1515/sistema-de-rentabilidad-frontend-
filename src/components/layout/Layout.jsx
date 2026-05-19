@@ -7,7 +7,7 @@ const Layout = ({ children }) => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
 
-  const handleLogout = () => { logout(); navigate("/login"); };
+  const handleLogout = async () => { await logout(); navigate("/login"); };
 
   return (
     <div className="d-flex" style={{ height: "100vh", overflow: "hidden", background: "var(--bg)" }}>

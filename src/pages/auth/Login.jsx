@@ -239,9 +239,16 @@ const Login = () => {
   const [now, setNow] = useState(Date.now());
   const navigate = useNavigate();
   const auth = useAuth();
+  const destinos = useMemo(() => ({ admin: "/admin-dashboard", propietario: "/dashboard", lider: "/panel-lider", empleado: "/mi-espacio" }), []);
   const normalizedEmail = useMemo(() => normalizeEmail(formData.email), [formData.email]);
   const isLocked = lockedUntil > now;
   const remainingTime = formatRemainingTime(lockedUntil - now);
+
+  useEffect(() => {
+    if (auth.user) {
+      navigate(destinos[auth.user?.rol] || "/dashboard", { replace: true });
+    }
+  }, [auth.user, destinos, navigate]);
 
   useEffect(() => {
     const activeLock = getLockUntil(normalizedEmail);
@@ -290,8 +297,7 @@ const Login = () => {
       setLoading(true);
       const data = await login(formData);
       clearFailedLogin(normalizedEmail);
-      auth.login(data.token, data.user);
-      const destinos = { admin: "/admin-dashboard", propietario: "/dashboard", lider: "/panel-lider", empleado: "/mi-espacio" };
+      auth.login(data.user);
       navigate(destinos[data.user?.rol] || "/dashboard");
     } catch (err) {
       const status = err.response?.status;

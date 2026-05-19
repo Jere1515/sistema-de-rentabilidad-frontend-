@@ -1,66 +1,137 @@
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { getCurrentUser, logoutRequest } from "../services/authService";
+
+const AUTH_CHANNEL = "auth";
+const AUTH_EVENT_KEY = "auth_event";
 
 const AuthContext = createContext({
   user: null,
-  token: null,
+  authLoading: true,
   login: () => {},
   logout: () => {},
   setUser: () => {},
+  updateUser: () => {},
+  refreshSession: () => {},
 });
 
-const isTokenValid = (t) => {
-  if (!t) return false;
+const clearLegacyAuthStorage = () => {
   try {
-    const { exp } = JSON.parse(atob(t.split(".")[1]));
-    return exp * 1000 > Date.now();
+    sessionStorage.removeItem("token");
+    sessionStorage.removeItem("user");
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
   } catch {
-    return false;
+    // Storage can be unavailable in private or restricted browser modes.
   }
 };
 
 export const AuthProvider = ({ children }) => {
-  const [token, setToken] = useState(() => {
-    const t = sessionStorage.getItem("token");
-    if (!isTokenValid(t)) {
-      sessionStorage.removeItem("token");
-      sessionStorage.removeItem("user");
-      return null;
-    }
-    return t;
-  });
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const channelRef = useRef(null);
 
-  const [user, setUser] = useState(() => {
-    if (!isTokenValid(sessionStorage.getItem("token"))) return null;
+  const refreshSession = useCallback(async () => {
     try {
-      const stored = sessionStorage.getItem("user");
-      return stored ? JSON.parse(stored) : null;
+      clearLegacyAuthStorage();
+      const response = await getCurrentUser();
+      setUser(response.user || response.data || null);
     } catch {
-      return null;
+      setUser(null);
+    } finally {
+      setAuthLoading(false);
     }
-  });
+  }, []);
 
-  const login = (newToken, newUser) => {
-    sessionStorage.setItem("token", newToken);
-    sessionStorage.setItem("user", JSON.stringify(newUser));
-    setToken(newToken);
+  const publishAuthEvent = useCallback((type) => {
+    const event = { type, at: Date.now() };
+
+    try {
+      channelRef.current?.postMessage(event);
+    } catch {
+      // BroadcastChannel is optional; localStorage is the fallback.
+    }
+
+    try {
+      localStorage.setItem(AUTH_EVENT_KEY, JSON.stringify(event));
+    } catch {
+      // Ignore storage failures; the current tab has already updated state.
+    }
+  }, []);
+
+  useEffect(() => {
+    clearLegacyAuthStorage();
+    refreshSession();
+  }, [refreshSession]);
+
+  useEffect(() => {
+    const handleAuthEvent = (event) => {
+      if (!event?.type) return;
+
+      if (event.type === "AUTH_LOGOUT") {
+        setUser(null);
+        setAuthLoading(false);
+        return;
+      }
+
+      if (event.type === "AUTH_LOGIN" || event.type === "AUTH_USER_UPDATED") {
+        refreshSession();
+      }
+    };
+
+    if ("BroadcastChannel" in window) {
+      channelRef.current = new BroadcastChannel(AUTH_CHANNEL);
+      channelRef.current.onmessage = ({ data }) => handleAuthEvent(data);
+    }
+
+    const handleStorage = (event) => {
+      if (event.key !== AUTH_EVENT_KEY || !event.newValue) return;
+
+      try {
+        handleAuthEvent(JSON.parse(event.newValue));
+      } catch {
+        // Ignore malformed auth events.
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      channelRef.current?.close();
+      channelRef.current = null;
+    };
+  }, [refreshSession]);
+
+  const login = (newUser) => {
+    clearLegacyAuthStorage();
     setUser(newUser);
+    setAuthLoading(false);
+    publishAuthEvent("AUTH_LOGIN");
   };
 
-  const logout = () => {
-    sessionStorage.removeItem("token");
-    sessionStorage.removeItem("user");
-    setToken(null);
-    setUser(null);
+  const logout = async () => {
+    try {
+      await logoutRequest();
+    } catch {
+      // Even if the request fails, the UI should leave the session locally.
+    } finally {
+      clearLegacyAuthStorage();
+      setUser(null);
+      setAuthLoading(false);
+      publishAuthEvent("AUTH_LOGOUT");
+    }
   };
 
   const updateUser = (fields) => {
-    const updated = { ...user, ...fields };
-    sessionStorage.setItem("user", JSON.stringify(updated));
-    setUser(updated);
+    setUser((currentUser) => {
+      const updated = currentUser ? { ...currentUser, ...fields } : currentUser;
+      if (updated) publishAuthEvent("AUTH_USER_UPDATED");
+      return updated;
+    });
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, setUser, updateUser }}>
+    <AuthContext.Provider value={{ user, authLoading, login, logout, setUser, updateUser, refreshSession }}>
       {children}
     </AuthContext.Provider>
   );

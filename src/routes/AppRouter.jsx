@@ -45,12 +45,14 @@ const getHome = (user) => HOME[user?.rol] || "/login";
 
 /* ── Guards ────────────────────────────────────────── */
 const RequireAuth = ({ children }) => {
-  const { token } = useAuth();
-  return token ? children : <Navigate to="/login" replace />;
+  const { user, authLoading } = useAuth();
+  if (authLoading) return null;
+  return user ? children : <Navigate to="/login" replace />;
 };
 
 const RequireRole = ({ roles, children }) => {
-  const { user } = useAuth();
+  const { user, authLoading } = useAuth();
+  if (authLoading) return null;
   if (!user) return <Navigate to="/login" replace />;
   if (!roles.includes(user.rol)) {
     return <Navigate to={getHome(user)} replace />;
@@ -60,8 +62,10 @@ const RequireRole = ({ roles, children }) => {
 
 /* ── Router ────────────────────────────────────────── */
 export default function AppRouter() {
-  const { token, user } = useAuth();
-  const homeRedirect = token ? getHome(user) : "/login";
+  const { user, authLoading } = useAuth();
+  const homeRedirect = user ? getHome(user) : "/login";
+
+  if (authLoading) return null;
 
   return (
     <Routes>
@@ -71,7 +75,7 @@ export default function AppRouter() {
       {/* Login */}
       <Route
         path="/login"
-        element={token ? <Navigate to={homeRedirect} replace /> : <Login />}
+        element={user ? <Navigate to={homeRedirect} replace /> : <Login />}
       />
 
       {/* ══════════ ADMIN ══════════ */}

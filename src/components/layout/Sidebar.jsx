@@ -172,8 +172,8 @@ const Sidebar = () => {
         <button
           className="btn btn-sm w-100 d-flex align-items-center justify-content-center gap-2 rounded-3"
           style={{ background: "rgba(239,68,68,.15)", color: "#FCA5A5", fontSize: 12, fontWeight: 600, border: "1px solid rgba(239,68,68,.2)", transition: "all .2s" }}
-          onClick={() => {
-            logout();
+          onClick={async () => {
+            await logout();
             navigate("/login");
           }}
         >
